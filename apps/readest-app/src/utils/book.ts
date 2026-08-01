@@ -281,6 +281,23 @@ export const getCurrentPage = (book: Book, progress: BookProgress) => {
       : 0;
 };
 
+/**
+ * A book is "currently reading" iff it has real reading progress and has not
+ * been parked. Importing a book sets timestamps but never `progress` (only
+ * opening it does), so the progress gate drops freshly-added-but-unopened
+ * books; the status gate drops finished, abandoned (on hold) and
+ * manually-marked-unread books. A book actively being read has `readingStatus`
+ * either `undefined` (cleared from 'unread' on first open) or `'reading'`, both
+ * of which pass. Shared by the library's recently-read shelf and the
+ * home-screen reading widget so the two surfaces stay in sync.
+ */
+export const isCurrentlyReadingBook = (book: Book): boolean =>
+  !book.deletedAt &&
+  book.progress != null &&
+  book.readingStatus !== 'finished' &&
+  book.readingStatus !== 'abandoned' &&
+  book.readingStatus !== 'unread';
+
 export const getBookDirFromWritingMode = (writingMode: WritingMode) => {
   switch (writingMode) {
     case 'horizontal-tb':
@@ -377,13 +394,17 @@ export interface MetadataHashInfo {
   metaHash: string;
 }
 
-export const getMetadataHashInfo = (metadata: BookMetadata): MetadataHashInfo | undefined => {
+export const getMetadataHashInfo = (
+  metadata: BookMetadata,
+  filename?: string,
+): MetadataHashInfo | undefined => {
   if (!metadata) return;
   try {
     const title = getTitleForHash(metadata.title);
     const authors = getAuthorsList(metadata.author);
     const identifiers = getIdentifiersList(metadata.altIdentifier || metadata.identifier);
-    const hashSource = `${title}|${authors.join(',')}|${identifiers.join(',')}`;
+    let hashSource = `${title}|${authors.join(',')}|${identifiers.join(',')}`;
+    if (filename) hashSource += `|${filename}`;
     const metaHash = md5(hashSource.normalize('NFC'));
     return { title, authors, identifiers, hashSource, metaHash };
   } catch (error) {
@@ -392,6 +413,6 @@ export const getMetadataHashInfo = (metadata: BookMetadata): MetadataHashInfo | 
   return;
 };
 
-export const getMetadataHash = (metadata: BookMetadata) => {
-  return getMetadataHashInfo(metadata)?.metaHash;
+export const getMetadataHash = (metadata: BookMetadata, filename?: string) => {
+  return getMetadataHashInfo(metadata, filename)?.metaHash;
 };

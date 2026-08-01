@@ -2,7 +2,9 @@ package com.readest.native_bridge
 
 import android.Manifest
 import android.app.Activity
+import android.app.Application
 import android.app.PendingIntent
+import android.os.Bundle
 import android.content.ComponentName
 import android.content.ContentValues
 import android.content.Context
@@ -22,6 +24,10 @@ import android.view.WindowInsetsController
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.Rect
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 import android.os.Handler
 import android.os.Looper
 import android.util.Base64
@@ -50,6 +56,7 @@ import app.tauri.plugin.Plugin
 import app.tauri.plugin.Invoke
 import org.json.JSONArray
 import java.io.*
+import kotlin.math.abs
 import kotlinx.coroutines.*
 
 @InvokeArg
@@ -201,8 +208,32 @@ class NativeBridgePlugin(private val activity: Activity): Plugin(activity) {
     // a dead Activity.
     private val pluginScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
+    private var sensorManager: SensorManager? = null
+    private var ambientLightListening = false
+    private var lastEmittedLux: Float = Float.NaN
+    private val ambientLightListener = object : SensorEventListener {
+        override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+
+        override fun onSensorChanged(event: SensorEvent?) {
+            val lux = event?.values?.getOrNull(0) ?: return
+            // Skip tiny noise so JS hysteresis is not flooded (~SENSOR_DELAY_NORMAL).
+            if (!lastEmittedLux.isNaN() && abs(lux - lastEmittedLux) < 0.5f) return
+            lastEmittedLux = lux
+            val payload = JSObject()
+            payload.put("lux", lux.toDouble())
+            // Deliberately NOT emitOrQueue: that queue is for one-shot events
+            // like shared-intent that must survive until JS registers. This is
+            // a continuous stream, so a sample nobody is listening for is
+            // worthless and queueing it would grow without bound whenever the
+            // sensor outlives the listener (e.g. the WebView renderer dies).
+            triggerEvent("ambient-light", payload)
+        }
+    }
+
     override fun onDestroy() {
+        stopAmbientLightUpdatesInternal()
         pluginScope.cancel()
+        activity.application.unregisterActivityLifecycleCallbacks(lifecycleCallbacks)
         instance = null
     }
 
@@ -219,11 +250,34 @@ class NativeBridgePlugin(private val activity: Activity): Plugin(activity) {
         instance = this
         webViewRef = webView
         super.load(webView)
+        activity.application.registerActivityLifecycleCallbacks(lifecycleCallbacks)
         handleIntent(activity.intent)
     }
 
     override fun onNewIntent(intent: Intent) {
         handleIntent(intent)
+    }
+
+    // Tauri declares Plugin.onResume but never registers the observer that calls it.
+    private val lifecycleCallbacks = object : Application.ActivityLifecycleCallbacks {
+        override fun onActivityResumed(resumed: Activity) {
+            if (resumed === activity) releaseBrightnessOverride()
+        }
+
+        override fun onActivityCreated(a: Activity, b: Bundle?) {}
+        override fun onActivityStarted(a: Activity) {}
+        override fun onActivityPaused(a: Activity) {}
+        override fun onActivityStopped(a: Activity) {}
+        override fun onActivitySaveInstanceState(a: Activity, b: Bundle) {}
+        override fun onActivityDestroyed(a: Activity) {}
+    }
+
+    // The system owns brightness across a background trip: drop our window
+    // override on resume and keep whatever brightness the system shows now.
+    private fun releaseBrightnessOverride() {
+        val layoutParams = activity.window.attributes
+        layoutParams.screenBrightness = WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+        activity.window.attributes = layoutParams
     }
 
     private fun handleIntent(intent: Intent?) {
@@ -470,8 +524,10 @@ class NativeBridgePlugin(private val activity: Activity): Plugin(activity) {
 
                     val itemUri = resolver.insert(collection, values)
                     if (itemUri == null) {
+                        val error = "MediaStore rejected $displayName ($mimeType) in $album"
+                        Log.e("NativeBridge", error)
                         r.put("success", false)
-                        r.put("error", "Failed to create MediaStore entry")
+                        r.put("error", error)
                         return@withContext r
                     }
 
@@ -492,8 +548,12 @@ class NativeBridgePlugin(private val activity: Activity): Plugin(activity) {
                     r.put("success", true)
                     r.put("uri", itemUri.toString())
                 } catch (e: Exception) {
+                    // OEM MediaStore implementations diverge on what they accept, so
+                    // the exception is the only thing that identifies a device-specific
+                    // failure from a bug report.
+                    Log.e("NativeBridge", "Failed to save image to gallery", e)
                     r.put("success", false)
-                    r.put("error", e.message)
+                    r.put("error", "${e.javaClass.simpleName}: ${e.message}")
                 }
                 r
             }
@@ -820,6 +880,73 @@ class NativeBridgePlugin(private val activity: Activity): Plugin(activity) {
             ret.put("error", e.message)
         }
         invoke.resolve(ret)
+    }
+
+    @Command
+    fun has_ambient_light_sensor(invoke: Invoke) {
+        val ret = JSObject()
+        try {
+            val sm = activity.getSystemService(Context.SENSOR_SERVICE) as SensorManager
+            val sensor = sm.getDefaultSensor(Sensor.TYPE_LIGHT)
+            ret.put("available", sensor != null)
+        } catch (e: Exception) {
+            ret.put("available", false)
+            ret.put("error", e.message)
+        }
+        invoke.resolve(ret)
+    }
+
+    @Command
+    fun start_ambient_light_updates(invoke: Invoke) {
+        val ret = JSObject()
+        try {
+            if (ambientLightListening) {
+                ret.put("success", true)
+                invoke.resolve(ret)
+                return
+            }
+            val sm = activity.getSystemService(Context.SENSOR_SERVICE) as SensorManager
+            val sensor = sm.getDefaultSensor(Sensor.TYPE_LIGHT)
+            if (sensor == null) {
+                ret.put("success", false)
+                ret.put("error", "No ambient light sensor")
+                invoke.resolve(ret)
+                return
+            }
+            sensorManager = sm
+            lastEmittedLux = Float.NaN
+            sm.registerListener(ambientLightListener, sensor, SensorManager.SENSOR_DELAY_NORMAL)
+            ambientLightListening = true
+            ret.put("success", true)
+        } catch (e: Exception) {
+            ret.put("success", false)
+            ret.put("error", e.message)
+        }
+        invoke.resolve(ret)
+    }
+
+    @Command
+    fun stop_ambient_light_updates(invoke: Invoke) {
+        val ret = JSObject()
+        try {
+            stopAmbientLightUpdatesInternal()
+            ret.put("success", true)
+        } catch (e: Exception) {
+            ret.put("success", false)
+            ret.put("error", e.message)
+        }
+        invoke.resolve(ret)
+    }
+
+    private fun stopAmbientLightUpdatesInternal() {
+        if (!ambientLightListening) return
+        try {
+            sensorManager?.unregisterListener(ambientLightListener)
+        } catch (_: Exception) {
+        }
+        ambientLightListening = false
+        sensorManager = null
+        lastEmittedLux = Float.NaN
     }
 
     @Command
@@ -1581,7 +1708,7 @@ class NativeBridgePlugin(private val activity: Activity): Plugin(activity) {
                             pluginScope.launch {
                                 val data = withContext(Dispatchers.IO) {
                                     val out = ByteArrayOutputStream()
-                                    bitmap.compress(Bitmap.CompressFormat.JPEG, 85, out)
+                                    bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
                                     Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
                                 }
                                 invoke.resolve(JSObject().put("data", data))

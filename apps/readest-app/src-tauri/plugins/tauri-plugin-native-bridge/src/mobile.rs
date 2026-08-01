@@ -68,6 +68,17 @@ impl<R: Runtime> NativeBridge<R> {
 }
 
 impl<R: Runtime> NativeBridge<R> {
+    pub fn set_text_selection_suppressed(
+        &self,
+        payload: SetTextSelectionSuppressedRequest,
+    ) -> crate::Result<()> {
+        self.0
+            .run_mobile_plugin("set_text_selection_suppressed", payload)
+            .map_err(Into::into)
+    }
+}
+
+impl<R: Runtime> NativeBridge<R> {
     pub fn install_package(
         &self,
         payload: InstallPackageRequest,
@@ -204,6 +215,30 @@ impl<R: Runtime> NativeBridge<R> {
     ) -> crate::Result<SetScreenBrightnessResponse> {
         self.0
             .run_mobile_plugin("set_screen_brightness", payload)
+            .map_err(Into::into)
+    }
+}
+
+impl<R: Runtime> NativeBridge<R> {
+    pub fn has_ambient_light_sensor(&self) -> crate::Result<HasAmbientLightSensorResponse> {
+        self.0
+            .run_mobile_plugin("has_ambient_light_sensor", ())
+            .map_err(Into::into)
+    }
+}
+
+impl<R: Runtime> NativeBridge<R> {
+    pub fn start_ambient_light_updates(&self) -> crate::Result<AmbientLightUpdatesResponse> {
+        self.0
+            .run_mobile_plugin("start_ambient_light_updates", ())
+            .map_err(Into::into)
+    }
+}
+
+impl<R: Runtime> NativeBridge<R> {
+    pub fn stop_ambient_light_updates(&self) -> crate::Result<AmbientLightUpdatesResponse> {
+        self.0
+            .run_mobile_plugin("stop_ambient_light_updates", ())
             .map_err(Into::into)
     }
 }
@@ -350,6 +385,17 @@ impl<R: Runtime> NativeBridge<R> {
     pub fn clip_url(&self, payload: ClipUrlRequest) -> crate::Result<ClipUrlResponse> {
         self.0
             .run_mobile_plugin("clip_url", payload)
+            .map_err(Into::into)
+    }
+
+    /// Read + delete a Share-Extension-captured page HTML file from the
+    /// App Group container (iOS only; Android resolves `html: None`).
+    pub fn read_share_clip_html(
+        &self,
+        payload: ReadShareClipHtmlRequest,
+    ) -> crate::Result<ReadShareClipHtmlResponse> {
+        self.0
+            .run_mobile_plugin("read_share_clip_html", payload)
             .map_err(Into::into)
     }
 }

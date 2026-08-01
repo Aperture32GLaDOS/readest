@@ -15,6 +15,7 @@ import {
   generateDarkPalette,
 } from '@/styles/themes';
 import { createFontCSS, CustomFont } from '@/styles/fonts';
+import { readStoredAmbientIsDarkMode } from './ambientLight';
 import { getOSPlatform } from './misc';
 import { SCROLL_WRAPPER_CLASS, SCROLL_WRAPPER_FIT_CLASS } from './scrollable';
 
@@ -264,10 +265,13 @@ const getColorStyles = (
     body.pbg {
       ${isDarkMode ? `background-color: ${bg} !important;` : ''}
     }
+    /* When inverting in dark mode, invert(100%) must stay the effective filter
+       (a later filter declaration would discard it), and multiply must not
+       apply: multiply with a dark page background erases the image (#5250). */
     img {
       ${isDarkMode && invertImgColorInDark ? 'filter: invert(100%);' : ''}
-      ${isDarkMode && overrideColor ? 'filter: grayscale(100%) contrast(1.2) brightness(1.2);' : ''}
-      ${overrideColor ? 'mix-blend-mode: multiply;' : ''}
+      ${isDarkMode && !invertImgColorInDark && overrideColor ? 'filter: grayscale(100%) contrast(1.2) brightness(1.2);' : ''}
+      ${overrideColor && !(isDarkMode && invertImgColorInDark) ? 'mix-blend-mode: multiply;' : ''}
     }
     svg, img {
       ${overrideColor ? `background-color: transparent !important;` : ''};
@@ -372,6 +376,13 @@ const getPageLayoutStyles = (
     zoom: ${zoomLevel};
     padding: unset;
     margin: unset;
+  }
+  /* -webkit-touch-callout on html/body does not reach descendant images in
+     Android WebView, and the native image callout collides with the reader's
+     touch handlers and can freeze the app */
+  img {
+    -webkit-touch-callout: none;
+    -webkit-user-drag: none;
   }
   svg:where(:not([width])), img:where(:not([width])) {
     width: auto;
@@ -799,14 +810,22 @@ export const getThemeCode = () => {
   let themeMode = 'auto';
   let themeColor = 'default';
   let systemIsDarkMode = false;
+  let ambientIsDarkMode = false;
   let customThemes: CustomTheme[] = [];
   if (typeof window !== 'undefined') {
     themeColor = localStorage.getItem('themeColor') || 'default';
     themeMode = localStorage.getItem('themeMode') || 'auto';
     systemIsDarkMode = localStorage.getItem('systemIsDarkMode') === 'true';
+    ambientIsDarkMode = readStoredAmbientIsDarkMode(
+      localStorage.getItem('ambientIsDarkMode'),
+      systemIsDarkMode,
+    );
     customThemes = JSON.parse(localStorage.getItem('customThemes') || '[]');
   }
-  const isDarkMode = themeMode === 'dark' || (themeMode === 'auto' && systemIsDarkMode);
+  const isDarkMode =
+    themeMode === 'dark' ||
+    (themeMode === 'auto' && systemIsDarkMode) ||
+    (themeMode === 'ambient' && ambientIsDarkMode);
   let currentTheme = themes.find((theme) => theme.name === themeColor);
   if (!currentTheme) {
     const customTheme = customThemes.find((theme) => theme.name === themeColor);
@@ -1094,10 +1113,17 @@ export const transformStylesheet = (css: string, vw: number, vh: number, vertica
     .replace(/([\s;])-ms-user-select\s*:\s*none/gi, '$1-ms-user-select: unset')
     .replace(/([\s;])-o-user-select\s*:\s*none/gi, '$1-o-user-select: unset')
     .replace(/([\s;])user-select\s*:\s*none/gi, '$1user-select: unset')
+    // Park the `var(--x, x)` chunks an earlier pass already produced: their
+    // inner keywords would otherwise be rewritten again into
+    // `var(--var(--serif, serif), serif)`, which is invalid, so the CSS parser
+    // drops the whole declaration and the book loses its fonts (readest#5277).
+    // The placeholders are underscore-wrapped so `\b` never matches inside them.
+    .replace(/var\(\s*--(sans-serif|serif|monospace)\s*,\s*\1\s*\)/gi, 'READEST_GF_$1_PLACEHOLDER')
     .replace(/(font-family\s*:[^;]*?)\bsans-serif\b/gi, '$1READEST_SS_PLACEHOLDER')
     .replace(/(font-family\s*:[^;]*?)\bserif\b(?!-)/gi, '$1var(--serif, serif)')
     .replace(/READEST_SS_PLACEHOLDER/g, 'var(--sans-serif, sans-serif)')
     .replace(/(font-family\s*:[^;]*?)\bmonospace\b/gi, '$1var(--monospace, monospace)')
+    .replace(/READEST_GF_(sans-serif|serif|monospace)_PLACEHOLDER/gi, 'var(--$1, $1)')
     .replace(/([\s;])font-weight\s*:\s*normal/gi, '$1font-weight: var(--font-weight)')
     .replace(/([\s;])color\s*:\s*black/gi, '$1color: var(--theme-fg-color)')
     .replace(/([\s;])color\s*:\s*#000000/gi, '$1color: var(--theme-fg-color)')

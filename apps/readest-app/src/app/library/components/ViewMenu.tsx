@@ -77,6 +77,7 @@ const ViewMenu: React.FC<ViewMenuProps> = ({ setIsDropdownOpen }) => {
     { label: _('Date Added'), value: LibrarySortByType.Created },
     { label: _('Date Published'), value: LibrarySortByType.Published },
     { label: _('Progress Read'), value: LibrarySortByType.Progress },
+    { label: _('Time Remaining'), value: LibrarySortByType.TimeRemaining },
   ];
 
   const sortBy2Options: { label: string; value: LibrarySecondarySortByType }[] = [
@@ -178,7 +179,7 @@ const ViewMenu: React.FC<ViewMenuProps> = ({ setIsDropdownOpen }) => {
         <MenuItem
           key={option.value}
           label={option.label}
-          buttonClass='h-8'
+          buttonClass='min-h-8 !py-1'
           toggled={viewMode === option.value}
           onClick={() => handleSetViewMode(option.value as LibraryViewModeType)}
           transient
@@ -187,10 +188,15 @@ const ViewMenu: React.FC<ViewMenuProps> = ({ setIsDropdownOpen }) => {
 
       {/* Columns */}
       <hr aria-hidden='true' className='border-base-200 my-1' />
-      <MenuItem label={_('Columns')} buttonClass='h-8' labelClass='text-sm sm:text-xs' disabled />
+      <MenuItem
+        label={_('Columns')}
+        buttonClass='min-h-8 !py-1'
+        labelClass='text-sm sm:text-xs'
+        disabled
+      />
       <MenuItem
         label={_('Auto')}
-        buttonClass='h-10'
+        buttonClass='min-h-10 !py-2'
         toggled={autoColumns}
         disabled={viewMode === 'list'}
         siblings={
@@ -212,7 +218,7 @@ const ViewMenu: React.FC<ViewMenuProps> = ({ setIsDropdownOpen }) => {
       <hr aria-hidden='true' className='border-base-200 my-1' />
       <MenuItem
         label={_('Book Covers')}
-        buttonClass='h-8'
+        buttonClass='min-h-8 !py-1'
         labelClass='text-sm sm:text-xs'
         disabled
       />
@@ -220,7 +226,7 @@ const ViewMenu: React.FC<ViewMenuProps> = ({ setIsDropdownOpen }) => {
         <MenuItem
           key={option.value}
           label={option.label}
-          buttonClass='h-8'
+          buttonClass='min-h-8 !py-1'
           toggled={coverFit === option.value}
           onClick={() => handleToggleCropCovers(option.value as LibraryCoverFitType)}
           transient
@@ -231,7 +237,7 @@ const ViewMenu: React.FC<ViewMenuProps> = ({ setIsDropdownOpen }) => {
       <hr aria-hidden='true' className='border-base-200 my-1' />
       <MenuItem
         label={_('Show recently read')}
-        buttonClass='h-8'
+        buttonClass='min-h-8 !py-1'
         toggled={settings.libraryRecentShelfEnabled}
         onClick={handleToggleRecentShelf}
         transient
@@ -245,7 +251,7 @@ const ViewMenu: React.FC<ViewMenuProps> = ({ setIsDropdownOpen }) => {
             <MenuItem
               key={option.value}
               label={option.label}
-              buttonClass='h-8'
+              buttonClass='min-h-8 !py-1'
               toggled={groupBy === option.value}
               onClick={() => handleSetGroupBy(option.value as LibraryGroupByType)}
               transient
@@ -265,7 +271,7 @@ const ViewMenu: React.FC<ViewMenuProps> = ({ setIsDropdownOpen }) => {
               <MenuItem
                 key={option.value}
                 label={isImplicit ? `${option.label} (${_('Auto')})` : option.label}
-                buttonClass='h-8'
+                buttonClass='min-h-8 !py-1'
                 toggled={toggled}
                 onClick={() => handleSetSortBy(option.value as LibrarySortByType)}
                 transient
@@ -277,7 +283,7 @@ const ViewMenu: React.FC<ViewMenuProps> = ({ setIsDropdownOpen }) => {
             <MenuItem
               key={option.value.toString()}
               label={option.label}
-              buttonClass='h-8'
+              buttonClass='min-h-8 !py-1'
               toggled={isAscending === option.value}
               onClick={() => handleSetSortAscending(option.value)}
               transient
@@ -297,7 +303,7 @@ const ViewMenu: React.FC<ViewMenuProps> = ({ setIsDropdownOpen }) => {
               <MenuItem
                 key={option.value}
                 label={isImplicit ? `${option.label} (${_('Auto')})` : option.label}
-                buttonClass='h-8'
+                buttonClass='min-h-8 !py-1'
                 toggled={isExplicit || isImplicit}
                 onClick={() => handleSetSortBy2(option.value)}
                 transient

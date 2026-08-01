@@ -8,7 +8,7 @@
     "frontendDist": "../out",
     "devUrl": "http://localhost:3000",
     "beforeDevCommand": "pnpm dev",
-    "beforeBuildCommand": "pnpm build"
+    "beforeBuildCommand": "pnpm build && pnpm upload-sourcemaps"
   },
   "app": {
     "windows": [],
@@ -124,6 +124,20 @@
         "ext": ["pdf"],
         "description": "PDF file",
         "mimeType": "application/pdf",
+        "role": "Viewer"
+      },
+      {
+        "name": "txt",
+        "ext": ["txt"],
+        "description": "TXT file",
+        "mimeType": "text/plain",
+        "role": "Viewer"
+      },
+      {
+        "name": "md",
+        "ext": ["md"],
+        "description": "Markdown file",
+        "mimeType": "text/markdown",
         "role": "Viewer"
       }
     ],

@@ -144,13 +144,13 @@ export const DEFAULT_ONEDRIVE_SETTINGS = {
 
 export const DEFAULT_SYSTEM_SETTINGS: Partial<SystemSettings> = {
   keepLogin: false,
-  autoUpload: true,
   alwaysOnTop: false,
   openBookInNewWindow: true,
   alwaysShowStatusBar: false,
   autoCheckUpdates: true,
   updateChannel: 'stable',
   screenWakeLock: false,
+  autohideCursor: true,
   screenBrightness: -1, // -1~100, -1 for system default
   autoScreenBrightness: true,
   swipeBrightnessGesture: true,
@@ -178,6 +178,7 @@ export const DEFAULT_SYSTEM_SETTINGS: Partial<SystemSettings> = {
   libraryCoverFit: 'crop',
   libraryAutoColumns: true,
   libraryColumns: 6,
+  librarySkeuomorphicCovers: false,
   libraryRecentShelfEnabled: false,
 
   metadataSeriesCollapsed: false,
@@ -249,7 +250,6 @@ export const DEFAULT_READSETTINGS: ReadSettings = {
   notebookWidth: '25%',
   isNotebookPinned: false,
   notebookActiveTab: 'notes',
-  autohideCursor: true,
   translationProvider: 'deepl',
   translateTargetLang: 'EN',
   wordLensAutoDownload: true,
@@ -425,6 +425,7 @@ export const DEFAULT_TTS_CONFIG: TTSConfig = {
   ttsHighlightOptions: { style: 'highlight', color: '#808080' },
   ttsHighlightGranularity: 'word',
   ttsMediaMetadata: 'sentence',
+  ttsPlayerStyle: 'full',
 };
 
 export const DEFAULT_TRANSLATOR_CONFIG: TranslatorConfig = {
