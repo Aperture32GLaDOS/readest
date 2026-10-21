@@ -2,8 +2,9 @@ import React from 'react';
 import { MdClose, MdPlayCircleOutline } from 'react-icons/md';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useResponsiveSize } from '@/hooks/useResponsiveSize';
-import { BoxedList, SectionTitle, SettingsRow, SettingsSelect } from '../primitives';
+import { BoxedList, ScopeSwitch, SectionTitle, SettingsRow, SettingsSelect } from '../primitives';
 import { PiPlus } from 'react-icons/pi';
+import type { BackgroundTextureScope } from '@/helpers/settings';
 
 interface Texture {
   id: string;
@@ -16,8 +17,9 @@ interface Texture {
 interface BackgroundTextureSelectorProps {
   predefinedTextures: Texture[];
   customTextures: Texture[];
-  /** Section title, scoped to the page the texture applies to (#4743). */
-  title: string;
+  /** Which page's background is being edited (issue #5306). */
+  scope: BackgroundTextureScope;
+  onScopeChange: (scope: BackgroundTextureScope) => void;
   selectedTextureId: string;
   backgroundOpacity: number;
   backgroundSize: string;
@@ -31,7 +33,8 @@ interface BackgroundTextureSelectorProps {
 const BackgroundTextureSelector: React.FC<BackgroundTextureSelectorProps> = ({
   predefinedTextures,
   customTextures,
-  title,
+  scope,
+  onScopeChange,
   selectedTextureId,
   backgroundOpacity,
   backgroundSize,
@@ -48,7 +51,10 @@ const BackgroundTextureSelector: React.FC<BackgroundTextureSelectorProps> = ({
 
   return (
     <div>
-      <SectionTitle className='mb-2'>{title}</SectionTitle>
+      <div className='mb-2 flex items-center justify-between gap-2'>
+        <SectionTitle>{_('Background Image')}</SectionTitle>
+        <ScopeSwitch label={_('Background Image')} scope={scope} onScopeChange={onScopeChange} />
+      </div>
       <div className='mb-4 grid grid-cols-3 gap-4'>
         {allTextures.map((texture) => (
           // The swatch is a div (not a <button>) so the inner Delete

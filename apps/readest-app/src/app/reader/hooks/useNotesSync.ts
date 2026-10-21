@@ -6,14 +6,16 @@ import { useBookDataStore } from '@/store/bookDataStore';
 import { useReaderStore } from '@/store/readerStore';
 import { SYNC_NOTES_INTERVAL_SEC } from '@/services/constants';
 import { throttle } from '@/utils/throttle';
-import { getXPointerFromCFI, getCFIFromXPointer, XCFI } from '@/utils/xcfi';
+import { getXPointerFromCFI, getCFIFromXPointer, getCFIFromXPointerRange } from '@/utils/xcfi';
 import { getIndexFromCfi } from '@/utils/cfi';
+import { incomingNoteWins } from '@/utils/booknoteStamp';
+import { removeBookNoteOverlays } from '../utils/annotatorUtil';
 
 export const useNotesSync = (bookKey: string) => {
   const { user } = useAuth();
   const { syncedNotes, syncNotes, lastSyncedAtNotes } = useSync(bookKey);
   const { getConfig, setConfig, getBookData } = useBookDataStore();
-  const { getView } = useReaderStore();
+  const { getView, getViewsById } = useReaderStore();
 
   const config = getConfig(bookKey);
 
@@ -27,7 +29,9 @@ export const useNotesSync = (bookKey: string) => {
 
     const enriched: BookNote[] = [];
     for (const note of notes) {
-      if (note.cfi && !note.xpointer0) {
+      // KOReader turns any pulled note with an xpointer into a highlight, so a
+      // drawing never gets one; without it every plugin version skips it.
+      if (note.type !== 'ink' && note.cfi && !note.xpointer0) {
         try {
           const contents = view.renderer.getContents();
           const primaryIndex = view.renderer.primaryIndex;
@@ -38,12 +42,17 @@ export const useNotesSync = (bookKey: string) => {
               content.doc,
               content.index || 0,
               bookData.bookDoc ?? undefined,
+              bookData.book?.format,
             );
             enriched.push({
               ...note,
               xpointer0: xpResult.pos0 || xpResult.xpointer,
               xpointer1: xpResult.pos1,
-              updatedAt: Date.now(),
+              // Notebook uses a fixed compatibility anchor rather than a
+              // semantic annotation position. Enrich its transport metadata
+              // without manufacturing a newer content revision; otherwise an
+              // older client can repeatedly win LWW with unchanged Markdown.
+              updatedAt: note.type === 'notebook' ? note.updatedAt : Date.now(),
             });
             continue;
           }
@@ -59,21 +68,26 @@ export const useNotesSync = (bookKey: string) => {
   const convertXPointersOnPull = async (notes: BookNote[]): Promise<BookNote[]> => {
     const bookData = getBookData(bookKey);
     const book = bookData?.book;
-    if (!book || FIXED_LAYOUT_FORMATS.has(book.format)) return notes.filter((n) => n.cfi);
+    if (!book || FIXED_LAYOUT_FORMATS.has(book.format)) {
+      return notes.filter((n) => n.cfi || n.deletedAt);
+    }
 
     const view = getView(bookKey);
     const converted: BookNote[] = [];
     for (const note of notes) {
-      if (note.xpointer0 && !note.cfi) {
+      if (note.deletedAt) {
+        // A tombstone only needs its id to mark the local copy deleted; never
+        // drop it because its xpointer can't be resolved to a cfi (#5818).
+        converted.push(note);
+      } else if (note.xpointer0 && !note.cfi) {
         try {
           let cfi: string | undefined;
           if (note.xpointer1) {
-            const spineIndex = XCFI.extractSpineIndex(note.xpointer0);
-            const doc = await bookData.bookDoc?.sections?.[spineIndex]?.createDocument();
-            if (doc) {
-              const converter = new XCFI(doc, spineIndex);
-              cfi = converter.xPointerToCFI(note.xpointer0, note.xpointer1);
-            }
+            cfi = await getCFIFromXPointerRange(
+              note.xpointer0,
+              note.xpointer1,
+              bookData.bookDoc ?? undefined,
+            );
           } else {
             const contents = view?.renderer.getContents() ?? [];
             const primaryIndex = view?.renderer.primaryIndex;
@@ -116,9 +130,11 @@ export const useNotesSync = (bookKey: string) => {
     if (!config?.location || !book || !user) return {};
 
     const bookNotes = config.booknotes ?? [];
+    // A note without an xpointer is pushed until it gets one; a drawing never
+    // does (see populateXPointersForPush), so it goes only when it changed.
     const newNotes = bookNotes.filter(
       (note) =>
-        !note.xpointer0 ||
+        (!note.xpointer0 && note.type !== 'ink') ||
         lastSyncedAtNotes < note.updatedAt ||
         lastSyncedAtNotes < (note.deletedAt ?? 0),
     );
@@ -147,16 +163,22 @@ export const useNotesSync = (bookKey: string) => {
         }
       },
       SYNC_NOTES_INTERVAL_SEC * 1000,
-      { emitLast: false },
+      // A highlight made inside the interval must still go out once it ends:
+      // without the trailing call it waited for the next highlight or for the
+      // book to be reopened on this device (#6762).
+      { emitLast: true },
     ),
     [syncNotes],
   );
 
+  // A book's first reading position is saved after its notes load, and that
+  // write keeps the same booknotes array, so re-run once it appears.
+  const hasLocation = !!config?.location;
   useEffect(() => {
-    if (!config?.location || !user) return;
+    if (!hasLocation || !user) return;
     handleAutoSync();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [config?.booknotes, handleAutoSync]);
+  }, [hasLocation, config?.booknotes, handleAutoSync]);
 
   useEffect(() => {
     const processNewNote = (note: BookNote) => {
@@ -164,13 +186,21 @@ export const useNotesSync = (bookKey: string) => {
       const oldNotes = config?.booknotes ?? [];
       const existingNote = oldNotes.find((oldNote) => oldNote.id === note.id);
       if (existingNote) {
-        if (
-          existingNote.updatedAt < note.updatedAt ||
-          (existingNote.deletedAt ?? 0) < (note.deletedAt ?? 0)
-        ) {
-          return { ...existingNote, ...note };
+        if (incomingNoteWins(existingNote, note)) {
+          // A tombstone from KOReader carries no cfi; keep the local anchor or
+          // setConfig discards the note instead of recording the deletion. The
+          // winner's deletedAt is pinned either way so a newer live note does
+          // not inherit a stale local tombstone through a missing key.
+          return {
+            ...existingNote,
+            ...note,
+            cfi: note.cfi || existingNote.cfi,
+            deletedAt: note.deletedAt,
+          };
         } else {
-          return { ...note, ...existingNote };
+          // The local note wins; a losing tombstone must not leak its
+          // deletedAt through a key the live note never had.
+          return { ...note, ...existingNote, deletedAt: existingNote.deletedAt };
         }
       }
       return note;
@@ -185,15 +215,26 @@ export const useNotesSync = (bookKey: string) => {
       if (!newNotes.length) return;
       // Convert xpointer-only notes (from KOReader) to CFI
       const convertedNotes = await convertXPointersOnPull(newNotes);
+      const oldNotes = config.booknotes ?? [];
       convertedNotes.forEach((note) => {
-        if (note.cfi) {
+        if (note.deletedAt) {
+          // Deleted on another device: clear the overlay drawn from the
+          // local copy, which is the one holding the cfi it was drawn with,
+          // unless the local note was edited after that deletion.
+          const local = oldNotes.find((oldNote) => oldNote.id === note.id);
+          if (local?.type === 'annotation' && !local.deletedAt && incomingNoteWins(local, note)) {
+            getViewsById(bookKey.split('-')[0]!).forEach((v) => removeBookNoteOverlays(v, local));
+            // Stamp the deletion as this device's own change so the next push
+            // tombstones the duplicate row under its book hash as well.
+            note.updatedAt = Date.now();
+          }
+        } else if (note.type === 'annotation' && note.cfi) {
           const index = getIndexFromCfi(note.cfi);
-          if (!note.deletedAt && index === view?.renderer.primaryIndex) {
+          if (index === view?.renderer.primaryIndex) {
             view.addAnnotation(note);
           }
         }
       });
-      const oldNotes = config.booknotes ?? [];
       const mergedNotes = [
         ...oldNotes.filter((oldNote) => !convertedNotes.some((n) => n.id === oldNote.id)),
         ...convertedNotes.map(processNewNote),
